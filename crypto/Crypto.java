@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.sql.*;
+import org.json.JSONObject;
 
 /*
  * updateAssets -> used to add or update assets that the user currently hold
@@ -23,7 +24,7 @@ public class Crypto {
     private String baseApi = "https://api.coingecko.com/api/v3/simple/price?ids=";
     private String defaultCurrency = "&vs_currencies=usd";
     private ArrayList<String> allCurrencies = new ArrayList<>(
-            Arrays.asList("bitcoin", "ethereum", "binancecoin", "solana", "ripple", "dogecoin", "toncoin"));
+            Arrays.asList("bitcoin", "ethereum", "binancecoin", "solana", "ripple", "dogecoin", "the-open-network"));
     private static final String DB_NAME;
     private static final String DB_PASSWORD;
     private static final String DB_USER;
@@ -50,23 +51,26 @@ public class Crypto {
         if (TABLE_NAME == null)
             throw new Error("table name can not be empty");
         if (DB_PORT == null)
-            throw new Error("port can not be empyt");
+            throw new Error("port can not be empty");
         if (DB_HOST == null)
-            throw new Error("host can not be empyt");
+            throw new Error("host can not be empty");
 
     }
 
-    private Connection connect() throws SQLException {
+    private Connection connect() throws SQLException, ClassNotFoundException {
+        // Load the driver
+         Class.forName("com.mysql.cj.jdbc.Driver");
         // makes sure to connect to the database
         String url = "jdbc:mysql://" + DB_HOST + ":" + DB_PORT + "/" + DB_NAME;
         return DriverManager.getConnection(url, DB_USER, DB_PASSWORD);
+
     }
 
     private Boolean isValidAsset(String asset) {
         return allCurrencies.contains(asset);
     }
 
-    public void removeAsset(String asset) throws SQLException {
+    public void removeAsset(String asset) throws SQLException, ClassNotFoundException {
         // deletes asset from the database
         if (!(isValidAsset(asset)))
             throw new Error("invalid asset name");
@@ -78,7 +82,7 @@ public class Crypto {
         }
     }
 
-    public void updateAssets(String asset, Double quantity) throws SQLException {
+    public void updateAssets(String asset, Double quantity) throws SQLException, ClassNotFoundException {
         // updates an asset from the database
         // its meant to update and also add assets
         if (!(isValidAsset(asset)))
@@ -93,7 +97,7 @@ public class Crypto {
         }
     }
 
-    private HashMap<String, Double> getOwnedWithQuantity() throws SQLException {
+    private HashMap<String, Double> getOwnedWithQuantity() throws SQLException, ClassNotFoundException {
         // returns all owned asset along with their quantity
         HashMap<String, Double> assetMap = new HashMap<>();
         try (Connection conn = connect()) {
@@ -107,7 +111,7 @@ public class Crypto {
         return assetMap;
     }
 
-    public ArrayList<String> getAvailableAssets() throws SQLException {
+    public ArrayList<String> getAvailableAssets() throws SQLException , ClassNotFoundException{
         // returns assets that the user currently does not own
         ArrayList<String> availableCurrencies = new ArrayList<>();
         HashMap<String, Double> ownedCurrencies = getOwnedWithQuantity();
@@ -119,7 +123,8 @@ public class Crypto {
         return availableCurrencies;
     }
 
-    public HashMap<String, Double> getOwnedPrices() throws SQLException, IOException, InterruptedException {
+    public HashMap<String, Pair<Double, Double>> getOwnedPrices()
+            throws SQLException, IOException, InterruptedException, ClassNotFoundException {
         HashMap<String, Double> assets = getOwnedWithQuantity();
         // check for the size of the assets
         if (assets.size() == 0) {
@@ -140,21 +145,18 @@ public class Crypto {
 
         // send a request
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        String json = response.body();
+        String jsonString = response.body();
+        JSONObject obj = new JSONObject(jsonString);
 
-        HashMap<String, Double> pricePair = new HashMap<>();
-        // iterate over the json and extract data
-        for (String currency : assets.keySet()) {
-            Double quantity = assets.get(currency);
+        HashMap<String, Pair<Double, Double>> pricePair = new HashMap<>();
 
-            String key = "\"" + currency + "\":{\"usd\":";
-            int start = json.indexOf(key);
-            start += key.length();
-            int end = json.indexOf("}", start);
-            String priceStr = json.substring(start, end);
-            Double priceDouble = Double.parseDouble(priceStr);
+        for (String key : obj.keySet()) {
+            JSONObject coinData = obj.getJSONObject(key);
+            double usdValue = coinData.getDouble("usd");
 
-            pricePair.put(currency, priceDouble * quantity);
+            // For example, storing (usd, 0.0) in the Pair just as placeholder
+            Double unitPrice = assets.get(key);
+            pricePair.put(key, new Pair<>(unitPrice,Math.round(1000.0 * unitPrice * usdValue)/1000.0));
         }
         return pricePair;
     }
